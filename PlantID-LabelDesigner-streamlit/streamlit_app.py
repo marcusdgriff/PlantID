@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 import os
-IS_CLOUD = os.environ.get("STREAMLIT_CLOUD") == "true"
 
 from reportlab.lib.pagesizes import mm, A4
 from reportlab.pdfgen import canvas
@@ -12,8 +11,12 @@ from reportlab.graphics import renderPDF
 from reportlab.graphics.shapes import Drawing
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
-if not IS_CLOUD:
+# --- ROBUST IMPORT: Handle missing pdf2image/poppler gracefully ---
+try:
     from pdf2image import convert_from_bytes
+    PDF2IMAGE_AVAILABLE = True
+except (ImportError, Exception):
+    PDF2IMAGE_AVAILABLE = False
 
 # ======================================================
 # Draw a single label directly onto a ReportLab canvas
@@ -314,37 +317,45 @@ show_border = st.sidebar.checkbox("Show border", True)
 
 # ---- Preview ----
 st.subheader("Live preview")
-if not IS_CLOUD:
-    buffer = io.BytesIO()
-    c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
-    draw_label_on_canvas(
-        c_prev,
-        df.iloc[row_index],
-        0,
-        0,
-        visible_columns,
-        qr_column,
-        highlight_column,
-        label_width,
-        label_height,
-        qr_size,
-        row_height_factor,
-        sidebar_factor,
-        highlight_padding,
-        show_border=show_border,
-        show_column_names=show_column_names,
-        side_highlight=side_highlight,
-        qr_left_offset=qr_left_offset,
-    )
-    c_prev.save()
-    buffer.seek(0)
 
-    img = convert_from_bytes(buffer.getvalue(), dpi=300)[0]
-    st.image(img)
+if PDF2IMAGE_AVAILABLE:
+    try:
+        buffer = io.BytesIO()
+        # Create a temp canvas just for the single label preview
+        c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
+        draw_label_on_canvas(
+            c_prev,
+            df.iloc[row_index],
+            0,
+            0,
+            visible_columns,
+            qr_column,
+            highlight_column,
+            label_width,
+            label_height,
+            qr_size,
+            row_height_factor,
+            sidebar_factor,
+            highlight_padding,
+            show_border=show_border,
+            show_column_names=show_column_names,
+            side_highlight=side_highlight,
+            qr_left_offset=qr_left_offset,
+        )
+        c_prev.save()
+        buffer.seek(0)
+
+        # Attempt to convert PDF to Image
+        img = convert_from_bytes(buffer.getvalue(), dpi=300)[0]
+        st.image(img)
+
+    except Exception as e:
+        # If poppler is missing (runtime error) or other issues, fall back safely
+        st.warning("Preview unavailable: PDF tools (Poppler) not detected in this environment.")
+        st.info("You can still download the final PDF below.")
 else:
-    st.info(
-        "Live preview is disabled on Streamlit Cloud. Use the PDF export to verify layout."
-    )
+    st.info("Live preview is disabled because 'pdf2image' or 'poppler' is missing.")
+    st.caption("Use the 'Download PDF' button to verify your layout.")
 
 # ---- Export ----
 if st.button("Generate Multi-Label PDF"):
