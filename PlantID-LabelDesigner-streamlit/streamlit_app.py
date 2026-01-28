@@ -320,6 +320,30 @@ if IS_CLOUD:
         "Live preview is disabled on Streamlit Cloud due to system "
         "library limitations. Use the PDF export below to verify layout."
     )
+    if st.button("Generate Preview PDF"):
+        preview_pdf_path = generate_sheet_direct(
+            df.iloc[[row_index]],  # only single row
+            visible_columns,
+            qr_column,
+            highlight_column,
+            label_width,
+            label_height,
+            qr_size,
+            row_height_factor,
+            sidebar_factor,
+            highlight_padding,
+            show_border,
+            show_column_names,
+            side_highlight,
+            qr_left_offset,
+        )
+        st.success("Preview PDF generated")
+        st.download_button(
+            "Download Preview PDF",
+            data=open(preview_pdf_path, "rb"),
+            file_name="label_preview.pdf",
+            mime="application/pdf",
+        )
 else:
     buffer = io.BytesIO()
     c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
