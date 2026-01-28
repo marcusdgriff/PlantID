@@ -12,8 +12,8 @@ from reportlab.graphics import renderPDF
 from reportlab.graphics.shapes import Drawing
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
-from pdf2image import convert_from_bytes
-
+if not IS_CLOUD:
+    from pdf2image import convert_from_bytes
 
 # ======================================================
 # Draw a single label directly onto a ReportLab canvas
@@ -314,37 +314,7 @@ show_border = st.sidebar.checkbox("Show border", True)
 
 # ---- Preview ----
 st.subheader("Live preview")
-
-if IS_CLOUD:
-    st.info(
-        "Live preview is disabled on Streamlit Cloud due to system "
-        "library limitations. Use the PDF export below to verify layout."
-    )
-    if st.button("Generate Preview PDF"):
-        preview_pdf_path = generate_sheet_direct(
-            df.iloc[[row_index]],  # only single row
-            visible_columns,
-            qr_column,
-            highlight_column,
-            label_width,
-            label_height,
-            qr_size,
-            row_height_factor,
-            sidebar_factor,
-            highlight_padding,
-            show_border,
-            show_column_names,
-            side_highlight,
-            qr_left_offset,
-        )
-        st.success("Preview PDF generated")
-        st.download_button(
-            "Download Preview PDF",
-            data=open(preview_pdf_path, "rb"),
-            file_name="label_preview.pdf",
-            mime="application/pdf",
-        )
-else:
+if not IS_CLOUD:
     buffer = io.BytesIO()
     c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
     draw_label_on_canvas(
@@ -371,6 +341,10 @@ else:
 
     img = convert_from_bytes(buffer.getvalue(), dpi=300)[0]
     st.image(img)
+else:
+    st.info(
+        "Live preview is disabled on Streamlit Cloud. Use the PDF export to verify layout."
+    )
 
 # ---- Export ----
 if st.button("Generate Multi-Label PDF"):
