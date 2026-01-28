@@ -5,7 +5,8 @@ PlantID Label Designer is a Streamlit web application for generating customizabl
 It is designed to work both locally and on Streamlit Cloud.
 
 ## Try the online version
-Try the app directly without installation: PlantID Label Designer on Streamlit￼
+Try the app directly without installation
+https://plantid-label-designer.streamlit.app
 
 ## Installation (Local)
 Clone this repository
