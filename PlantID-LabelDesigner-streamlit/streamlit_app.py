@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import io
+import os
+IS_CLOUD = os.environ.get("STREAMLIT_CLOUD") == "true"
 
 from reportlab.lib.pagesizes import mm, A4
 from reportlab.pdfgen import canvas
@@ -240,9 +242,18 @@ st.sidebar.header("Label size")
 
 LABEL_PRESETS = {
     "Custom": None,
-    "Standard Plant Label (70 × 35 mm)": (70, 35),
-    "Cryovial (25 × 12 mm)": (25, 12),
-    "Shipping (102 × 152 mm)": (102, 152),
+    "Cryovial (25 × 12 mm / 1 × 0.47)": (25, 12),
+    "Small Label (25 × 67 mm / 1 × 2.625)": (67, 25),
+    "Wristband Label (25 × 254 mm / 1 × 10)": (254, 25),
+    "Small Plant Tag (50 × 25 mm / 1.97 × 0.98)": (50, 25),
+    "Cryobox / Tube (30 × 15 mm / 1.18 × 0.59)": (30, 15),
+    "General Purpose (76 × 25 mm / 3 × 1)": (76, 25),
+    "Food Label (76 × 51 mm / 3 × 2)": (76, 51),
+    "Tag Label (57 × 102 mm / 2.25 × 4)": (57, 102),
+    "Standard Plant Label (70 × 35 mm / 2.76 × 1.38)": (70, 35),
+    "Large Field Label (90 × 45 mm / 3.54 × 1.77)": (90, 45),
+    "Shipping Label (102 × 152 mm / 4 × 6)": (102, 152),
+    "Square Label (51 × 51 mm / 2 × 2)": (51, 51),
 }
 
 preset = st.sidebar.selectbox("Preset", list(LABEL_PRESETS.keys()))
@@ -302,33 +313,40 @@ sidebar_factor = (
 show_border = st.sidebar.checkbox("Show border", True)
 
 # ---- Preview ----
-buffer = io.BytesIO()
-c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
-draw_label_on_canvas(
-    c_prev,
-    df.iloc[row_index],
-    0,
-    0,
-    visible_columns,
-    qr_column,
-    highlight_column,
-    label_width,
-    label_height,
-    qr_size,
-    row_height_factor,
-    sidebar_factor,
-    highlight_padding,
-    show_border=show_border,
-    show_column_names=show_column_names,
-    side_highlight=side_highlight,
-    qr_left_offset=qr_left_offset,
-)
-c_prev.save()
-buffer.seek(0)
-
-img = convert_from_bytes(buffer.getvalue(), dpi=300)[0]
 st.subheader("Live preview")
-st.image(img)
+
+if IS_CLOUD:
+    st.info(
+        "Live preview is disabled on Streamlit Cloud due to system "
+        "library limitations. Use the PDF export below to verify layout."
+    )
+else:
+    buffer = io.BytesIO()
+    c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
+    draw_label_on_canvas(
+        c_prev,
+        df.iloc[row_index],
+        0,
+        0,
+        visible_columns,
+        qr_column,
+        highlight_column,
+        label_width,
+        label_height,
+        qr_size,
+        row_height_factor,
+        sidebar_factor,
+        highlight_padding,
+        show_border=show_border,
+        show_column_names=show_column_names,
+        side_highlight=side_highlight,
+        qr_left_offset=qr_left_offset,
+    )
+    c_prev.save()
+    buffer.seek(0)
+
+    img = convert_from_bytes(buffer.getvalue(), dpi=300)[0]
+    st.image(img)
 
 # ---- Export ----
 if st.button("Generate Multi-Label PDF"):
