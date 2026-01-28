@@ -4,4 +4,4 @@ numpy
 reportlab
 qrcode[pil]
 pillow
-pdf2image
+pypdfium2

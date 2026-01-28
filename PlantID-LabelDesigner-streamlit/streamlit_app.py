@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import os
+import pypdfium2 as pdfium
 
 from reportlab.lib.pagesizes import mm, A4
 from reportlab.pdfgen import canvas
@@ -10,13 +11,6 @@ from reportlab.graphics.barcode import qr
 from reportlab.graphics import renderPDF
 from reportlab.graphics.shapes import Drawing
 from reportlab.pdfbase.pdfmetrics import stringWidth
-
-# --- ROBUST IMPORT: Handle missing pdf2image/poppler gracefully ---
-try:
-    from pdf2image import convert_from_bytes
-    PDF2IMAGE_AVAILABLE = True
-except (ImportError, Exception):
-    PDF2IMAGE_AVAILABLE = False
 
 # ======================================================
 # Draw a single label directly onto a ReportLab canvas
@@ -318,44 +312,45 @@ show_border = st.sidebar.checkbox("Show border", True)
 # ---- Preview ----
 st.subheader("Live preview")
 
-if PDF2IMAGE_AVAILABLE:
-    try:
-        buffer = io.BytesIO()
-        # Create a temp canvas just for the single label preview
-        c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
-        draw_label_on_canvas(
-            c_prev,
-            df.iloc[row_index],
-            0,
-            0,
-            visible_columns,
-            qr_column,
-            highlight_column,
-            label_width,
-            label_height,
-            qr_size,
-            row_height_factor,
-            sidebar_factor,
-            highlight_padding,
-            show_border=show_border,
-            show_column_names=show_column_names,
-            side_highlight=side_highlight,
-            qr_left_offset=qr_left_offset,
-        )
-        c_prev.save()
-        buffer.seek(0)
+try:
+    # 1. Generate the single label PDF into memory
+    buffer = io.BytesIO()
+    c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
+    
+    draw_label_on_canvas(
+        c_prev,
+        df.iloc[row_index],
+        0,
+        0,
+        visible_columns,
+        qr_column,
+        highlight_column,
+        label_width,
+        label_height,
+        qr_size,
+        row_height_factor,
+        sidebar_factor,
+        highlight_padding,
+        show_border=show_border,
+        show_column_names=show_column_names,
+        side_highlight=side_highlight,
+        qr_left_offset=qr_left_offset,
+    )
+    c_prev.save()
+    buffer.seek(0)
 
-        # Attempt to convert PDF to Image
-        img = convert_from_bytes(buffer.getvalue(), dpi=300)[0]
-        st.image(img)
+    # 2. Convert PDF buffer to Image using pypdfium2
+    pdf = pdfium.PdfDocument(buffer)
+    page = pdf[0]
+    # Scale=3 gives roughly 200-220 DPI resolution, nice and crisp
+    bitmap = page.render(scale=3) 
+    pil_image = bitmap.to_pil()
+    
+    # 3. Display
+    st.image(pil_image, caption=f"Previewing Row {row_index + 1}")
 
-    except Exception as e:
-        # If poppler is missing (runtime error) or other issues, fall back safely
-        st.warning("Preview unavailable: PDF tools (Poppler) not detected in this environment.")
-        st.info("You can still download the final PDF below.")
-else:
-    st.info("Live preview is disabled because 'pdf2image' or 'poppler' is missing.")
-    st.caption("Use the 'Download PDF' button to verify your layout.")
+except Exception as e:
+    st.error(f"An error occurred during preview: {e}")
 
 # ---- Export ----
 if st.button("Generate Multi-Label PDF"):
