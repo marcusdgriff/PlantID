@@ -1,9 +1,0 @@
-# macOS system files
-.DS_Store
-
-# Python caches
-__pycache__/
-*.pyc
-
-# Streamlit temp
-.streamlit/
