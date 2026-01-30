@@ -8,6 +8,7 @@ from reportlab.lib.pagesizes import mm, A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.graphics.barcode import qr
+from reportlab.graphics.barcode import code128
 from reportlab.graphics import renderPDF
 from reportlab.graphics.shapes import Drawing
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -29,11 +30,14 @@ def draw_label_on_canvas(
     x,
     y,
     visible_columns,
-    qr_column,
+    code_column,
+    code_type="QR",
     highlight_column=None,
     label_width=70,
     label_height=35,
     qr_size=18,
+    barcode_width=25,
+    barcode_height=10,
     row_height_factor=0.9,
     sidebar_factor=0.25,
     highlight_padding=2,
@@ -43,101 +47,115 @@ def draw_label_on_canvas(
     side_highlight=False,
     qr_left_offset=2,
 ):
-
     lw_pt = label_width * mm
     lh_pt = label_height * mm
     pad_pt = padding * mm
-    qr_pt = qr_size * mm
 
+    # ---- 1. Outer border ----
     if show_border:
+        c.saveState()
         c.setStrokeColor(colors.lightgrey)
         c.setLineWidth(0.5)
         c.rect(x, y, lw_pt, lh_pt, stroke=1, fill=0)
+        c.restoreState()
 
-    row_count = max(len(visible_columns), 1)
-    row_height = ((lh_pt - 2 * pad_pt) / row_count) * row_height_factor
-    text_y_start = y + lh_pt - pad_pt - row_height * 0.1
-
+    # ---- 2. Sidebar Logic (Isolated with saveState) ----
     side_col_width = 0
     if side_highlight and highlight_column:
         side_col_width = lw_pt * sidebar_factor
-
         col_name = highlight_column
         value = str(df_row[highlight_column])
-
         font_size = 6
-        font_value = "Helvetica-Bold"
-        font_name = "Helvetica-Oblique"
 
-        value_width = stringWidth(value, font_value, font_size) + highlight_padding
-        name_width = stringWidth(f"{col_name}:", font_name, font_size)
+        # Calculate sidebar geometry
+        val_w = stringWidth(value, "Helvetica-Bold", font_size) + highlight_padding
+        nam_w = stringWidth(f"{col_name}:", "Helvetica-Oblique", font_size)
         gap = 1 * mm
-        total_height = name_width + gap + value_width
-        sidebar_bottom = y + (lh_pt - total_height) / 2
+        total_h = nam_w + gap + val_w
+        sidebar_bottom = y + (lh_pt - total_h) / 2
 
-        c.setFillColor(colors.black)
-        c.setFont(font_name, font_size)
+        # Draw Side Label text
         c.saveState()
-        c.translate(x + side_col_width / 2, sidebar_bottom + name_width / 2)
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica-Oblique", font_size)
+        c.translate(x + side_col_width / 2, sidebar_bottom + nam_w / 2)
         c.rotate(90)
         c.drawCentredString(0, 0, f"{col_name}:")
         c.restoreState()
 
-        value_rect_y = sidebar_bottom + name_width + gap
-        c.setFillColor(colors.black)
-        c.rect(x, value_rect_y, side_col_width, value_width, fill=1, stroke=0)
-
-        c.setFillColor(colors.white)
-        c.setFont(font_value, font_size)
+        # Draw Side Value Box
+        val_rect_y = sidebar_bottom + nam_w + gap
         c.saveState()
-        c.translate(x + side_col_width / 2, value_rect_y + value_width / 2)
+        c.setFillColor(colors.black)
+        c.rect(x, val_rect_y, side_col_width, val_w, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", font_size)
+        c.translate(x + side_col_width / 2, val_rect_y + val_w / 2)
         c.rotate(90)
         c.drawCentredString(0, 0, value)
         c.restoreState()
 
-    if qr_column is not None and qr_size > 0:
-        qr_x = x + qr_left_offset * mm
-        qr_y = y + (lh_pt - qr_pt) / 2
-        qr_value = str(df_row[qr_column])
+    # ---- 3. Code (QR/Barcode) Logic ----
+    code_x = x + side_col_width + (qr_left_offset * mm)
+    text_x = x + side_col_width + pad_pt
 
-        qrobj = qr.QrCodeWidget(qr_value)
-        bounds = qrobj.getBounds()
-        scale = qr_pt / max(bounds[2] - bounds[0], bounds[3] - bounds[1])
+    if code_column is not None and code_type != "None":
+        val = str(df_row[code_column])
+        
+        if code_type == "QR":
+            qr_pt = qr_size * mm
+            code_y = y + (lh_pt - qr_pt) / 2
+            qrobj = qr.QrCodeWidget(val)
+            b = qrobj.getBounds()
+            scale = qr_pt / max(b[2]-b[0], b[3]-b[1])
+            d = Drawing(qr_pt, qr_pt, transform=[scale, 0, 0, scale, 0, 0])
+            d.add(qrobj)
+            renderPDF.draw(d, c, code_x, code_y)
+            text_x = code_x + qr_pt + 2 * mm
 
-        d = Drawing(qr_pt, qr_pt, transform=[scale, 0, 0, scale, 0, 0])
-        d.add(qrobj)
-        renderPDF.draw(d, c, qr_x, qr_y)
+        elif code_type == "Barcode":
+            bw_pt = barcode_width * mm
+            bh_pt = barcode_height * mm
+            code_y = y + (lh_pt - bh_pt) / 2
+            
+            # Draw directly to canvas (Corrected from previous Drawing approach)
+            bc = code128.Code128(
+                val, 
+                barHeight=bh_pt, 
+                barWidth=bw_pt / max(len(val) * 11, 1), 
+                humanReadable=False
+            )
+            bc.drawOn(c, code_x, code_y)
+            text_x = code_x + bw_pt + 2 * mm
 
-        text_x = qr_x + qr_pt + 4 * mm
-    else:
-        text_x = x + pad_pt
-
-    available_width = lw_pt - (text_x - x) - pad_pt
+    # ---- 4. Text Rows Logic ----
+    row_count = max(len(visible_columns), 1)
+    row_height = ((lh_pt - 2 * pad_pt) / row_count) * row_height_factor
+    text_y_start = y + lh_pt - pad_pt - row_height * 0.1
+    avail_w = lw_pt - (text_x - x) - pad_pt
 
     for idx, col_name in enumerate(visible_columns):
-        value = str(df_row[col_name])
+        val = str(df_row[col_name])
         y_pos = text_y_start - idx * row_height
-
+        
+        c.saveState()
         if show_column_names:
             c.setFont("Helvetica-Oblique", 7)
             c.setFillColor(colors.black)
-            c.drawRightString(text_x + available_width / 3, y_pos, f"{col_name}:")
+            c.drawRightString(text_x + avail_w * 0.35, y_pos, f"{col_name}:")
 
         if col_name == highlight_column:
-            value_width = stringWidth(value, "Helvetica-Bold", 7) + highlight_padding
-            rect_x = text_x + 2 / 3 * available_width - value_width / 2
-            rect_y = y_pos - 2
-
-            c.setFillColor(colors.black)
-            c.rect(rect_x, rect_y, value_width, 8, fill=1, stroke=0)
-
-            c.setFillColor(colors.white)
             c.setFont("Helvetica-Bold", 7)
-            c.drawCentredString(text_x + 2 / 3 * available_width, y_pos, value)
-        else:
+            v_w = stringWidth(val, "Helvetica-Bold", 7) + highlight_padding
             c.setFillColor(colors.black)
+            c.rect(text_x + avail_w * 0.4 - 2, y_pos - 2, v_w, 8, fill=1)
+            c.setFillColor(colors.white)
+            c.drawString(text_x + avail_w * 0.4, y_pos, val)
+        else:
             c.setFont("Helvetica", 7)
-            c.drawCentredString(text_x + 2 / 3 * available_width, y_pos, value)
+            c.setFillColor(colors.black)
+            c.drawString(text_x + avail_w * 0.4, y_pos, val)
+        c.restoreState()
 
 # ======================================================
 # Multi-label PDF sheet
@@ -145,11 +163,14 @@ def draw_label_on_canvas(
 def generate_sheet_direct(
     df,
     visible_columns,
-    qr_column,
+    code_column,
+    code_type,
     highlight_column,
     label_width,
     label_height,
     qr_size,
+    barcode_width,
+    barcode_height,
     row_height_factor,
     sidebar_factor,
     highlight_padding,
@@ -157,7 +178,7 @@ def generate_sheet_direct(
     show_column_names=True,
     side_highlight=False,
     qr_left_offset=2,
-    page_format="A4",
+    page_format="LabelPrinter",
 ):
     # Page size logic
     if page_format == "A4":
@@ -184,9 +205,18 @@ def generate_sheet_direct(
     for _, row in df.iterrows():
         draw_label_on_canvas(
             c, row, x, y,
-            visible_columns, qr_column, highlight_column,
-            label_width, label_height, qr_size,
-            row_height_factor, sidebar_factor, highlight_padding,
+            visible_columns,
+            code_column,
+            code_type,
+            highlight_column,
+            label_width,
+            label_height,
+            qr_size,
+            barcode_width,
+            barcode_height,
+            row_height_factor,
+            sidebar_factor,
+            highlight_padding,
             show_border=show_border,
             show_column_names=show_column_names,
             side_highlight=side_highlight,
@@ -240,23 +270,22 @@ df = st.session_state.df
 # ======================
 # Dataset controls (NEW)
 # ======================
-st.subheader("Dataset summary")
+st.subheader("Dataframe summary")
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Rows", len(df))
 c2.metric("Columns", df.shape[1])
 c3.metric("Source", st.session_state.data_source)
 
-with st.expander("Column overview"):
+with st.expander("Dataframe preview"):
     summary_df = pd.DataFrame({
-        "Column": df.columns,
-        "Type": df.dtypes.astype(str),
-        "Non-null": df.notna().sum().values
+        "Column Name": df.columns,
+        "Count": df.notna().sum().values
     })
     st.dataframe(summary_df, use_container_width=True)
     
-with st.expander("Dataset controls"):
-    st.warning("This will clear the current dataset and return you to the start page.")
+with st.expander("Dataframe controls"):
+    st.warning("This will clear the current dataframe and return you to the start page.")
 
     if st.button("Clear dataframe and restart"):
         st.session_state.df = None
@@ -270,7 +299,7 @@ st.sidebar.header("Data fields")
 visible_columns = st.sidebar.multiselect(
     "Columns to display",
     df.columns.tolist(),
-    default=df.columns.tolist()[:4],
+    default=df.columns.tolist()[:0],
 )
 
 row_index = st.sidebar.number_input(
@@ -306,20 +335,38 @@ if preset == "Custom":
 else:
     label_width, label_height = LABEL_PRESETS[preset]
 
-# ---- QR options ----
-st.sidebar.header("QR code")
-enable_qr = st.sidebar.checkbox("Include QR code", True)
+# ---- Code options ----
+st.sidebar.header("Code")
 
-if enable_qr:
-    qr_column = st.sidebar.selectbox("QR column", df.columns.tolist())
+code_type = st.sidebar.selectbox(
+    "Code type",
+    ["QR", "Barcode", "None"],
+    index=0,
+)
+
+if code_type != "None":
+    code_column = st.sidebar.selectbox("Code column", df.columns.tolist())
+else:
+    code_column = None
+
+if code_type == "QR":
     qr_size = st.sidebar.slider(
         "QR size (mm)", 8, max(8, label_height - 2), min(18, label_height - 2)
     )
-    qr_left_offset = st.sidebar.slider("QR left offset (mm)", 0, int(label_width / 2), 2)
-else:
-    qr_column = None
+    barcode_width = 0
+    barcode_height = 0
+
+elif code_type == "Barcode":
+    barcode_width = st.sidebar.slider("Barcode width (mm)", 15, label_width - 5, 25)
+    barcode_height = st.sidebar.slider("Barcode height (mm)", 5, label_height - 5, 10)
     qr_size = 0
-    qr_left_offset = 0
+
+else:
+    qr_size = 0
+    barcode_width = 0
+    barcode_height = 0
+
+qr_left_offset = st.sidebar.slider("Code left offset (mm)", 0, int(label_width / 2), 2)
 
 # ---- Design ----
 st.sidebar.header("Design")
@@ -357,11 +404,14 @@ draw_label_on_canvas(
     df.iloc[row_index],
     0, 0,
     visible_columns,
-    qr_column,
+    code_column,
+    code_type,
     highlight_column,
     label_width,
     label_height,
     qr_size,
+    barcode_width,
+    barcode_height,
     row_height_factor,
     sidebar_factor,
     highlight_padding,
@@ -385,7 +435,8 @@ st.subheader("Export Labels / PDF")
 # ---- Page size / printer selector ----
 page_format = st.selectbox(
     "Page size / printer",
-    ["A4", "Letter", "LabelPrinter"]
+    ["A4", "Letter", "LabelPrinter"],
+    index=2
 )
 
 # ---- Generate button ----
@@ -393,11 +444,14 @@ if st.button("Generate Multi-Label PDF"):
     pdf_path = generate_sheet_direct(
         df,
         visible_columns,
-        qr_column,
+        code_column,
+        code_type,
         highlight_column,
         label_width,
         label_height,
         qr_size,
+        barcode_width,
+        barcode_height,
         row_height_factor,
         sidebar_factor,
         highlight_padding,
@@ -405,7 +459,7 @@ if st.button("Generate Multi-Label PDF"):
         show_column_names=show_column_names,
         side_highlight=side_highlight,
         qr_left_offset=qr_left_offset,
-        page_format=page_format,  # <- pass selected format
+        page_format=page_format,
     )
     st.success("PDF generated")
     st.download_button(
