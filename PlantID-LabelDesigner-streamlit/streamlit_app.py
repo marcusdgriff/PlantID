@@ -4,7 +4,7 @@ import io
 import os
 import pypdfium2 as pdfium
 
-from reportlab.lib.pagesizes import mm, A4, LETTER
+from reportlab.lib.pagesizes import mm, A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.graphics.barcode import qr
@@ -142,9 +142,6 @@ def draw_label_on_canvas(
 # ======================================================
 # Multi-label PDF sheet
 # ======================================================
-# ======================================================
-# Multi-label PDF sheet with flexible page size
-# ======================================================
 def generate_sheet_direct(
     df,
     visible_columns,
@@ -156,32 +153,33 @@ def generate_sheet_direct(
     row_height_factor,
     sidebar_factor,
     highlight_padding,
-    page_format="A4",
     show_border=True,
     show_column_names=True,
     side_highlight=False,
     qr_left_offset=2,
-    page_format="A4",   # NEW
+    page_format="A4",
 ):
-    # Label printer page = one label per page
+    # Page size logic
     if page_format == "A4":
         page_width, page_height = A4
-        multiple_labels_per_page = True
+        margin = 5 * mm
     elif page_format == "Letter":
-        page_width, page_height = LETTER
-        multiple_labels_per_page = True
+        from reportlab.lib.pagesizes import letter
+        page_width, page_height = letter
+        margin = 5 * mm
     elif page_format == "LabelPrinter":
-        page_width, page_height = label_width * mm, label_height * mm
-        multiple_labels_per_page = False
+        # Exact label size, no margin
+        page_width = label_width * mm
+        page_height = label_height * mm
+        margin = 0
     else:
         page_width, page_height = A4
-        multiple_labels_per_page = True
+        margin = 5 * mm
 
     c = canvas.Canvas("multi_labels.pdf", pagesize=(page_width, page_height))
-    margin = 5 * mm if multiple_labels_per_page else 0
 
     x = margin
-    y = page_height - (label_height * mm + margin)
+    y = page_height - label_height * mm - margin
 
     for _, row in df.iterrows():
         draw_label_on_canvas(
@@ -195,17 +193,14 @@ def generate_sheet_direct(
             qr_left_offset=qr_left_offset,
         )
 
-        if multiple_labels_per_page:
-            x += label_width * mm + margin
-            if x + label_width * mm + margin > page_width:
+        x += label_width * mm + margin
+        if x + label_width * mm > page_width:
+            x = margin
+            y -= label_height * mm + margin
+            if y < margin:
+                c.showPage()
                 x = margin
-                y -= label_height * mm + margin
-                if y - label_height * mm < 0:
-                    c.showPage()
-                    x = margin
-                    y = page_height - label_height * mm - margin
-        else:
-            c.showPage()  # Start a new page for each label
+                y = page_height - label_height * mm - margin
 
     c.save()
     return "multi_labels.pdf"
@@ -357,12 +352,38 @@ st.subheader("Live preview")
 buffer = io.BytesIO()
 c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
 
-except Exception as e:
-    st.error(f"An error occurred during preview: {e}")
-    
-# ---- Export format ----
-st.sidebar.header("Export format")
-page_format = st.sidebar.selectbox(
+draw_label_on_canvas(
+    c_prev,
+    df.iloc[row_index],
+    0, 0,
+    visible_columns,
+    qr_column,
+    highlight_column,
+    label_width,
+    label_height,
+    qr_size,
+    row_height_factor,
+    sidebar_factor,
+    highlight_padding,
+    show_border=show_border,
+    show_column_names=show_column_names,
+    side_highlight=side_highlight,
+    qr_left_offset=qr_left_offset,
+)
+c_prev.save()
+buffer.seek(0)
+
+pdf = pdfium.PdfDocument(buffer)
+pil_image = pdf[0].render(scale=3).to_pil()
+st.image(pil_image, caption=f"Previewing Row {row_index + 1}")
+
+# ======================
+# Export PDF
+# ======================
+st.subheader("Export Labels / PDF")
+
+# ---- Page size / printer selector ----
+page_format = st.selectbox(
     "Page size / printer",
     ["A4", "Letter", "LabelPrinter"]
 )
@@ -380,11 +401,11 @@ if st.button("Generate Multi-Label PDF"):
         row_height_factor,
         sidebar_factor,
         highlight_padding,
-        page_format=page_format,  # Pass the selected format
         show_border=show_border,
         show_column_names=show_column_names,
         side_highlight=side_highlight,
         qr_left_offset=qr_left_offset,
+        page_format=page_format,  # <- pass selected format
     )
     st.success("PDF generated")
     st.download_button(
