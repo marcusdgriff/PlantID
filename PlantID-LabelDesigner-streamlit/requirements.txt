@@ -2,6 +2,6 @@ streamlit
 pandas
 numpy
 reportlab
-qrcode[pil]
+qrcode
 pillow
 pypdfium2
