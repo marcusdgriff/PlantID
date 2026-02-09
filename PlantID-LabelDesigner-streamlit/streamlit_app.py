@@ -314,28 +314,27 @@ if st.session_state.df is None:
     st.info("Upload a CSV or use the example dataset to begin.")
     st.stop()
 
-# ======================
+# ==========================================
 # Section order containers
-# ======================
+# ==========================================
 summary_container = st.container()
 preview_container = st.container()
 filter_container = st.container()
 export_container = st.container()
 
 with filter_container:
-    # ======================
-    # Filtering & Row Selection (NEW)
-    # ======================
+    # ==========================================
+    # 3. Filter & Select Rows
+    # ==========================================
     st.subheader("3. Filter & Select Rows")
 
-    # Filter Section
-    col_f1, col_f2 = st.columns([2, 1])
-    with col_f1:
-        search_query = st.text_input("🔍 Search rows (e.g. 'Arabidopsis' or 'Salt')", placeholder="Type to filter...")
-    with col_f2:
-        filter_col = st.selectbox("Search in column", ["All Columns"] + st.session_state.df.columns.tolist())
+    st.write("Check the **Print** box for rows you want to include in the PDF:")
 
-    # Apply keyword filter
+    table_col, controls_col = st.columns([4, 1])
+    with controls_col:
+        filter_col = st.selectbox("Filter in column", ["All Columns"] + st.session_state.df.columns.tolist())
+        search_query = st.text_input("Search rows", placeholder="Type to filter...")
+
     if search_query:
         if filter_col == "All Columns":
             mask = st.session_state.df.astype(str).apply(lambda x: x.str.contains(search_query, case=False, na=False)).any(axis=1)
@@ -345,41 +344,23 @@ with filter_container:
     else:
         filtered_df = st.session_state.df.copy()
 
-    # Subset Selection via Data Editor
-    st.write("Check the **Print** box for rows you want to include in the PDF:")
-    filtered_df.insert(0, "Print", True) # Default all filtered to True
+    df_for_selection = filtered_df.copy()
+    df_for_selection.insert(0, "Print", True)
 
-    edited_df = st.data_editor(
-        filtered_df,
-        column_config={"Print": st.column_config.CheckboxColumn("Print", default=True)},
-        disabled=st.session_state.df.columns,
-        use_container_width=True,
-        hide_index=True
-    )
+    with table_col:
+        edited_df = st.data_editor(
+            df_for_selection,
+            column_config={"Print": st.column_config.CheckboxColumn("Print", default=True)},
+            disabled=st.session_state.df.columns,
+            use_container_width=True,
+            hide_index=True,
+            key="editor"
+        )
 
-    # Final dataframe to be used for preview and generation
     df_to_use = edited_df[edited_df["Print"] == True].drop(columns=["Print"])
 
     if df_to_use.empty:
         st.warning("No rows selected for printing. Please filter or check boxes above.")
-        st.stop()
-
-# ======================
-# Dataset summary
-# ======================
-with summary_container:
-    st.subheader("1. Dataset Summary")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Original Rows", len(st.session_state.df))
-    c2.metric("Filtered Rows", len(filtered_df))
-    c3.metric("Selected for Printing", len(df_to_use))
-
-    with st.expander("Dataframe controls"):
-        st.warning("This will clear the current dataframe and return you to the start page.")
-        if st.button("Clear dataframe and restart"):
-            st.session_state.df = None
-            st.session_state.data_source = None
-            st.rerun()
 
 # ---- Sidebar ----
 st.sidebar.title("Label Setup")
@@ -388,14 +369,14 @@ st.sidebar.title("Label Setup")
 with st.sidebar.expander("Data Fields", expanded=True):
     visible_columns = st.multiselect(
         "Columns to display",
-        df_to_use.columns.tolist(),
-        default=df_to_use.columns.tolist()[:2] if len(df_to_use.columns) > 1 else df_to_use.columns.tolist(),
+        st.session_state.df.columns.tolist(),
+        default=st.session_state.df.columns.tolist()[:2] if len(st.session_state.df.columns) > 1 else st.session_state.df.columns.tolist(),
     )
 
     row_index = st.number_input(
         "Preview row",
         min_value=1,
-        max_value=len(df_to_use),
+        max_value=max(1, len(filtered_df)),
         value=1,
     ) - 1
     
@@ -462,7 +443,7 @@ with st.sidebar.expander("Label Size", expanded=False):
 # 3. Code Settings Category
 with st.sidebar.expander("Code Settings", expanded=False):
     code_type = st.selectbox("Code type", ["QR", "Barcode", "None"], index=0)
-    code_column = st.selectbox("Code column", df_to_use.columns.tolist()) if code_type != "None" else None
+    code_column = st.selectbox("Code column", st.session_state.df.columns.tolist()) if code_type != "None" else None
 
     if code_type == "QR":
         qr_max = max(8, int(label_height - 2))
@@ -484,7 +465,7 @@ with st.sidebar.expander("Design & Aesthetics", expanded=False):
     text_left_offset = st.slider("Text left offset (mm)", 0, int(label_width / 2), 0)
     label_font = st.selectbox("Label font", ["Helvetica", "Times-Roman", "Courier"], index=0)
     label_font_size = st.slider("Label font size (pt)", 4, 14, 7)
-    highlight_column = st.selectbox("Highlight column", ["None"] + df_to_use.columns.tolist())
+    highlight_column = st.selectbox("Highlight column", ["None"] + st.session_state.df.columns.tolist())
     highlight_column = None if highlight_column == "None" else highlight_column
 
     if highlight_column:
@@ -496,44 +477,69 @@ with st.sidebar.expander("Design & Aesthetics", expanded=False):
     sidebar_factor = st.slider("Sidebar width factor", 0.05, 0.5, 0.1) if side_highlight else 0
     show_border = st.checkbox("Show border", True)
 
-with preview_container:
-    # ---- Preview ----
-    st.subheader("2. Live Preview")
-    buffer = io.BytesIO()
-    c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
+with summary_container:
+    # ==========================================
+    # 1. Dataset Summary
+    # ==========================================
+    st.subheader("1. Dataset Summary")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Original Rows", len(st.session_state.df))
+    c2.metric("Filtered Rows", len(filtered_df))
+    c3.metric("Data Source", st.session_state.data_source)
 
-    draw_label_on_canvas(
-        c_prev, df_to_use.iloc[row_index], 0, 0,
-        visible_columns, code_column, code_type, highlight_column,
-        label_font, label_font_size, label_width, label_height,
-        qr_size, barcode_width, barcode_height, row_height_factor,
-        sidebar_factor, highlight_padding, show_border=show_border,
-        show_column_names=show_column_names, side_highlight=side_highlight,
-        qr_left_offset=qr_left_offset, text_left_offset=text_left_offset
-    )
-    c_prev.save()
-    buffer.seek(0)
-    st.image(pdfium.PdfDocument(buffer)[0].render(scale=3).to_pil(), caption=f"Previewing Selected Row {row_index + 1}")
+    with st.expander("Dataframe controls"):
+        st.warning("This will clear the current dataframe and return you to the start page.")
+        if st.button("Clear dataframe and restart"):
+            st.session_state.df = None
+            st.session_state.data_source = None
+            st.rerun()
+
+with preview_container:
+    # ==========================================
+    # 2. Live Preview
+    # ==========================================
+    st.subheader("2. Live Preview")
+    if not filtered_df.empty:
+        buffer = io.BytesIO()
+        c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
+
+        draw_label_on_canvas(
+            c_prev, filtered_df.iloc[row_index], 0, 0,
+            visible_columns, code_column, code_type, highlight_column,
+            label_font, label_font_size, label_width, label_height,
+            qr_size, barcode_width, barcode_height, row_height_factor,
+            sidebar_factor, highlight_padding, show_border=show_border,
+            show_column_names=show_column_names, side_highlight=side_highlight,
+            qr_left_offset=qr_left_offset, text_left_offset=text_left_offset
+        )
+        c_prev.save()
+        buffer.seek(0)
+        st.image(pdfium.PdfDocument(buffer)[0].render(scale=3).to_pil(), caption=f"Previewing Row {row_index + 1}")
+    else:
+        st.info("No rows match the filter for preview.")
 
 with export_container:
-    # ======================
-    # Export PDF
-    # ======================
+    # ==========================================
+    # 4. Export Labels / PDF
+    # ==========================================
     st.subheader("4. Export Labels / PDF")
     page_format = st.selectbox("Page size / printer", ["A4", "Letter", "LabelPrinter"], index=2)
 
     if st.button("Generate Multi-Label PDF"):
-        pdf_path = generate_sheet_direct(
-            df_to_use, visible_columns, code_column, code_type, highlight_column,
-            label_font, label_font_size, label_width, label_height, qr_size,
-            barcode_width, barcode_height, row_height_factor, sidebar_factor,
-            highlight_padding, show_border, show_column_names, side_highlight,
-            qr_left_offset, text_left_offset, page_format, repeat_count
-        )
-        st.success(f"PDF generated for {len(df_to_use)} unique labels ({len(df_to_use)*repeat_count} total).")
-        st.download_button(
-            "Download PDF",
-            data=open(pdf_path, "rb"),
-            file_name=f"multi_labels_{page_format}.pdf",
-            mime="application/pdf"
-        )
+        if df_to_use.empty:
+            st.error("Cannot generate PDF: No rows selected.")
+        else:
+            pdf_path = generate_sheet_direct(
+                df_to_use, visible_columns, code_column, code_type, highlight_column,
+                label_font, label_font_size, label_width, label_height, qr_size,
+                barcode_width, barcode_height, row_height_factor, sidebar_factor,
+                highlight_padding, show_border, show_column_names, side_highlight,
+                qr_left_offset, text_left_offset, page_format, repeat_count
+            )
+            st.success(f"PDF generated for {len(df_to_use)} unique records ({len(df_to_use)*repeat_count} total labels).")
+            st.download_button(
+                "Download PDF",
+                data=open(pdf_path, "rb"),
+                file_name=f"multi_labels_{page_format}.pdf",
+                mime="application/pdf"
+            )
