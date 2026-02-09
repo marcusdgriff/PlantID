@@ -14,7 +14,7 @@ from reportlab.graphics.shapes import Drawing
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 # ======================================================
-# Session state for dataset (NEW)
+# Session state for dataset
 # ======================================================
 if "df" not in st.session_state:
     st.session_state.df = None
@@ -145,7 +145,7 @@ def draw_label_on_canvas(
             bh_pt = barcode_height * mm
             code_y = y + (lh_pt - bh_pt) / 2
             
-            # Draw directly to canvas (Corrected from previous Drawing approach)
+            # Draw directly to canvas
             bc = code128.Code128(
                 val,
                 barHeight=bh_pt,
@@ -282,7 +282,7 @@ st.set_page_config(layout="wide")
 st.title("PlantID Label Designer")
 
 # ======================
-# Start page (UPDATED)
+# Start page
 # ======================
 if st.session_state.df is None:
     st.subheader("Start")
