@@ -175,7 +175,7 @@ def draw_label_on_canvas(
 
         if col_name == highlight_column:
             c.setFont(font_variant(label_font, "bold"), label_font_size)
-            v_w = stringWidth(val, font_variant(label_font, "bold"), font_size) + highlight_padding
+            v_w = stringWidth(val, font_variant(label_font, "bold"), label_font_size) + highlight_padding
             c.setFillColor(colors.black)
             highlight_height = max(6, label_font_size + 2)
             highlight_y = y_pos - (label_font_size * 0.3)
