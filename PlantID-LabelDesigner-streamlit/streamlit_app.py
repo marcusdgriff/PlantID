@@ -24,6 +24,7 @@ if "data_source" not in st.session_state:
 # ======================================================
 # Draw a single label directly onto a ReportLab canvas
 # ======================================================
+
 def draw_label_on_canvas(
     c,
     df_row,
@@ -33,6 +34,8 @@ def draw_label_on_canvas(
     code_column,
     code_type="QR",
     highlight_column=None,
+    label_font="Helvetica",
+    label_font_size=7,
     label_width=70,
     label_height=35,
     qr_size=18,
@@ -46,7 +49,31 @@ def draw_label_on_canvas(
     show_column_names=True,
     side_highlight=False,
     qr_left_offset=2,
+    text_left_offset=0,
 ):
+    def font_variant(base_font, variant):
+        variants = {
+            "Helvetica": {
+                "regular": "Helvetica",
+                "bold": "Helvetica-Bold",
+                "italic": "Helvetica-Oblique",
+                "bold_italic": "Helvetica-BoldOblique",
+            },
+            "Times-Roman": {
+                "regular": "Times-Roman",
+                "bold": "Times-Bold",
+                "italic": "Times-Italic",
+                "bold_italic": "Times-BoldItalic",
+            },
+            "Courier": {
+                "regular": "Courier",
+                "bold": "Courier-Bold",
+                "italic": "Courier-Oblique",
+                "bold_italic": "Courier-BoldOblique",
+            },
+        }
+        return variants.get(base_font, variants["Helvetica"]).get(variant, base_font)
+
     lw_pt = label_width * mm
     lh_pt = label_height * mm
     pad_pt = padding * mm
@@ -65,11 +92,11 @@ def draw_label_on_canvas(
         side_col_width = lw_pt * sidebar_factor
         col_name = highlight_column
         value = str(df_row[highlight_column])
-        font_size = 6
+        font_size = label_font_size
 
         # Calculate sidebar geometry
-        val_w = stringWidth(value, "Helvetica-Bold", font_size) + highlight_padding
-        nam_w = stringWidth(f"{col_name}:", "Helvetica-Oblique", font_size)
+        val_w = stringWidth(value, font_variant(label_font, "bold"), font_size) + highlight_padding
+        nam_w = stringWidth(f"{col_name}:", font_variant(label_font, "italic"), font_size)
         gap = 1 * mm
         total_h = nam_w + gap + val_w
         sidebar_bottom = y + (lh_pt - total_h) / 2
@@ -77,7 +104,7 @@ def draw_label_on_canvas(
         # Draw Side Label text
         c.saveState()
         c.setFillColor(colors.black)
-        c.setFont("Helvetica-Oblique", font_size)
+        c.setFont(font_variant(label_font, "italic"), font_size)
         c.translate(x + side_col_width / 2, sidebar_bottom + nam_w / 2)
         c.rotate(90)
         c.drawCentredString(0, 0, f"{col_name}:")
@@ -89,7 +116,7 @@ def draw_label_on_canvas(
         c.setFillColor(colors.black)
         c.rect(x, val_rect_y, side_col_width, val_w, fill=1, stroke=0)
         c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", font_size)
+        c.setFont(font_variant(label_font, "bold"), font_size)
         c.translate(x + side_col_width / 2, val_rect_y + val_w / 2)
         c.rotate(90)
         c.drawCentredString(0, 0, value)
@@ -120,13 +147,15 @@ def draw_label_on_canvas(
             
             # Draw directly to canvas (Corrected from previous Drawing approach)
             bc = code128.Code128(
-                val, 
-                barHeight=bh_pt, 
-                barWidth=bw_pt / max(len(val) * 11, 1), 
+                val,
+                barHeight=bh_pt,
+                barWidth=bw_pt / max(len(val) * 11, 1),
                 humanReadable=False
             )
             bc.drawOn(c, code_x, code_y)
             text_x = code_x + bw_pt + 2 * mm
+
+    text_x += (text_left_offset * mm)
 
     # ---- 4. Text Rows Logic ----
     row_count = max(len(visible_columns), 1)
@@ -140,19 +169,21 @@ def draw_label_on_canvas(
         
         c.saveState()
         if show_column_names:
-            c.setFont("Helvetica-Oblique", 7)
+            c.setFont(font_variant(label_font, "italic"), label_font_size)
             c.setFillColor(colors.black)
             c.drawRightString(text_x + avail_w * 0.35, y_pos, f"{col_name}:")
 
         if col_name == highlight_column:
-            c.setFont("Helvetica-Bold", 7)
-            v_w = stringWidth(val, "Helvetica-Bold", 7) + highlight_padding
+            c.setFont(font_variant(label_font, "bold"), label_font_size)
+            v_w = stringWidth(val, font_variant(label_font, "bold"), font_size) + highlight_padding
             c.setFillColor(colors.black)
-            c.rect(text_x + avail_w * 0.4 - 2, y_pos - 2, v_w, 8, fill=1)
+            highlight_height = max(6, label_font_size + 2)
+            highlight_y = y_pos - (label_font_size * 0.3)
+            c.rect(text_x + avail_w * 0.4 - 2, highlight_y, v_w, highlight_height, fill=1)
             c.setFillColor(colors.white)
             c.drawString(text_x + avail_w * 0.4, y_pos, val)
         else:
-            c.setFont("Helvetica", 7)
+            c.setFont(font_variant(label_font, "regular"), label_font_size)
             c.setFillColor(colors.black)
             c.drawString(text_x + avail_w * 0.4, y_pos, val)
         c.restoreState()
@@ -166,6 +197,8 @@ def generate_sheet_direct(
     code_column,
     code_type,
     highlight_column,
+    label_font,
+    label_font_size,
     label_width,
     label_height,
     qr_size,
@@ -178,7 +211,9 @@ def generate_sheet_direct(
     show_column_names=True,
     side_highlight=False,
     qr_left_offset=2,
+    text_left_offset=0,
     page_format="LabelPrinter",
+    repeat_count=1,
 ):
     # Page size logic
     if page_format == "A4":
@@ -203,37 +238,42 @@ def generate_sheet_direct(
     y = page_height - label_height * mm - margin
 
     for _, row in df.iterrows():
-        draw_label_on_canvas(
-            c, row, x, y,
-            visible_columns,
-            code_column,
-            code_type,
-            highlight_column,
-            label_width,
-            label_height,
-            qr_size,
-            barcode_width,
-            barcode_height,
-            row_height_factor,
-            sidebar_factor,
-            highlight_padding,
-            show_border=show_border,
-            show_column_names=show_column_names,
-            side_highlight=side_highlight,
-            qr_left_offset=qr_left_offset,
-        )
+        for _ in range(repeat_count):
+            draw_label_on_canvas(
+                c, row, x, y,
+                visible_columns,
+                code_column,
+                code_type,
+                highlight_column,
+                label_font,
+                label_font_size,
+                label_width,
+                label_height,
+                qr_size,
+                barcode_width,
+                barcode_height,
+                row_height_factor,
+                sidebar_factor,
+                highlight_padding,
+                show_border=show_border,
+                show_column_names=show_column_names,
+                side_highlight=side_highlight,
+                qr_left_offset=qr_left_offset,
+                text_left_offset=text_left_offset,
+            )
 
-        x += label_width * mm + margin
-        if x + label_width * mm > page_width:
-            x = margin
-            y -= label_height * mm + margin
-            if y < margin:
-                c.showPage()
+            x += label_width * mm + margin
+            if x + label_width * mm > page_width:
                 x = margin
-                y = page_height - label_height * mm - margin
+                y -= label_height * mm + margin
+                if y < margin:
+                    c.showPage()
+                    x = margin
+                    y = page_height - label_height * mm - margin
 
     c.save()
     return "multi_labels.pdf"
+
 
 # ======================================================
 # Streamlit UI
@@ -253,7 +293,16 @@ if st.session_state.df is None:
     with col1:
         if st.button("Use example dataset"):
             example_path = os.path.join(os.path.dirname(__file__), "PV1_metadata.csv")
-            st.session_state.df = pd.read_csv(example_path)
+            # Create a simple example if file doesn't exist
+            if os.path.exists(example_path):
+                st.session_state.df = pd.read_csv(example_path)
+            else:
+                st.session_state.df = pd.DataFrame({
+                    "ID": ["P001", "P002", "P003", "P004"],
+                    "Species": ["Arabidopsis", "Arabidopsis", "Wheat", "Maize"],
+                    "Genotype": ["Col-0", "Ler", "Bobwhite", "B73"],
+                    "Treatment": ["Control", "Salt", "Control", "Drought"]
+                })
             st.session_state.data_source = "Example dataset"
             st.rerun()
 
@@ -265,206 +314,226 @@ if st.session_state.df is None:
     st.info("Upload a CSV or use the example dataset to begin.")
     st.stop()
 
-df = st.session_state.df
+# ======================
+# Section order containers
+# ======================
+summary_container = st.container()
+preview_container = st.container()
+filter_container = st.container()
+export_container = st.container()
+
+with filter_container:
+    # ======================
+    # Filtering & Row Selection (NEW)
+    # ======================
+    st.subheader("3. Filter & Select Rows")
+
+    # Filter Section
+    col_f1, col_f2 = st.columns([2, 1])
+    with col_f1:
+        search_query = st.text_input("🔍 Search rows (e.g. 'Arabidopsis' or 'Salt')", placeholder="Type to filter...")
+    with col_f2:
+        filter_col = st.selectbox("Search in column", ["All Columns"] + st.session_state.df.columns.tolist())
+
+    # Apply keyword filter
+    if search_query:
+        if filter_col == "All Columns":
+            mask = st.session_state.df.astype(str).apply(lambda x: x.str.contains(search_query, case=False, na=False)).any(axis=1)
+        else:
+            mask = st.session_state.df[filter_col].astype(str).str.contains(search_query, case=False, na=False)
+        filtered_df = st.session_state.df[mask].copy()
+    else:
+        filtered_df = st.session_state.df.copy()
+
+    # Subset Selection via Data Editor
+    st.write("Check the **Print** box for rows you want to include in the PDF:")
+    filtered_df.insert(0, "Print", True) # Default all filtered to True
+
+    edited_df = st.data_editor(
+        filtered_df,
+        column_config={"Print": st.column_config.CheckboxColumn("Print", default=True)},
+        disabled=st.session_state.df.columns,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # Final dataframe to be used for preview and generation
+    df_to_use = edited_df[edited_df["Print"] == True].drop(columns=["Print"])
+
+    if df_to_use.empty:
+        st.warning("No rows selected for printing. Please filter or check boxes above.")
+        st.stop()
 
 # ======================
-# Dataset controls (NEW)
+# Dataset summary
 # ======================
-st.subheader("Dataframe summary")
+with summary_container:
+    st.subheader("1. Dataset Summary")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Original Rows", len(st.session_state.df))
+    c2.metric("Filtered Rows", len(filtered_df))
+    c3.metric("Selected for Printing", len(df_to_use))
 
-c1, c2, c3 = st.columns(3)
-c1.metric("Rows", len(df))
-c2.metric("Columns", df.shape[1])
-c3.metric("Source", st.session_state.data_source)
-
-with st.expander("Dataframe preview"):
-    summary_df = pd.DataFrame({
-        "Column Name": df.columns,
-        "Count": df.notna().sum().values
-    })
-    st.dataframe(summary_df, use_container_width=True)
-    
-with st.expander("Dataframe controls"):
-    st.warning("This will clear the current dataframe and return you to the start page.")
-
-    if st.button("Clear dataframe and restart"):
-        st.session_state.df = None
-        st.session_state.data_source = None
-        st.rerun()
+    with st.expander("Dataframe controls"):
+        st.warning("This will clear the current dataframe and return you to the start page.")
+        if st.button("Clear dataframe and restart"):
+            st.session_state.df = None
+            st.session_state.data_source = None
+            st.rerun()
 
 # ---- Sidebar ----
 st.sidebar.title("Label Setup")
 
-st.sidebar.header("Data fields")
-visible_columns = st.sidebar.multiselect(
-    "Columns to display",
-    df.columns.tolist(),
-    default=df.columns.tolist()[:0],
-)
-
-row_index = st.sidebar.number_input(
-    "Preview row",
-    min_value=1,
-    max_value=len(df),
-    value=1,
-) - 1
-
-# ---- Label size ----
-st.sidebar.header("Label size")
-
-LABEL_PRESETS = {
-    "Custom": None,
-    "Cryovial (25 × 12 mm / 1 × 0.47)": (25, 12),
-    "Small Label (25 × 67 mm / 1 × 2.625)": (67, 25),
-    "Wristband Label (25 × 254 mm / 1 × 10)": (254, 25),
-    "Small Plant Tag (50 × 25 mm / 1.97 × 0.98)": (50, 25),
-    "Cryobox / Tube (30 × 15 mm / 1.18 × 0.59)": (30, 15),
-    "General Purpose (76 × 25 mm / 3 × 1)": (76, 25),
-    "Food Label (76 × 51 mm / 3 × 2)": (76, 51),
-    "Tag Label (57 × 102 mm / 2.25 × 4)": (57, 102),
-    "Standard Plant Label (70 × 35 mm / 2.76 × 1.38)": (70, 35),
-    "Large Field Label (90 × 45 mm / 3.54 × 1.77)": (90, 45),
-    "Shipping Label (102 × 152 mm / 4 × 6)": (102, 152),
-    "Square Label (51 × 51 mm / 2 × 2)": (51, 51),
-}
-
-preset = st.sidebar.selectbox("Preset", list(LABEL_PRESETS.keys()))
-if preset == "Custom":
-    label_width = st.sidebar.slider("Width (mm)", 10, 140, 70)
-    label_height = st.sidebar.slider("Height (mm)", 10, 140, 35)
-else:
-    label_width, label_height = LABEL_PRESETS[preset]
-
-# ---- Code options ----
-st.sidebar.header("Code")
-
-code_type = st.sidebar.selectbox(
-    "Code type",
-    ["QR", "Barcode", "None"],
-    index=0,
-)
-
-if code_type != "None":
-    code_column = st.sidebar.selectbox("Code column", df.columns.tolist())
-else:
-    code_column = None
-
-if code_type == "QR":
-    qr_size = st.sidebar.slider(
-        "QR size (mm)", 8, max(8, label_height - 2), min(18, label_height - 2)
+# 1. Data Fields Category
+with st.sidebar.expander("Data Fields", expanded=True):
+    visible_columns = st.multiselect(
+        "Columns to display",
+        df_to_use.columns.tolist(),
+        default=df_to_use.columns.tolist()[:2] if len(df_to_use.columns) > 1 else df_to_use.columns.tolist(),
     )
-    barcode_width = 0
-    barcode_height = 0
 
-elif code_type == "Barcode":
-    barcode_width = st.sidebar.slider("Barcode width (mm)", 15, label_width - 5, 25)
-    barcode_height = st.sidebar.slider("Barcode height (mm)", 5, label_height - 5, 10)
-    qr_size = 0
-
-else:
-    qr_size = 0
-    barcode_width = 0
-    barcode_height = 0
-
-qr_left_offset = st.sidebar.slider("Code left offset (mm)", 0, int(label_width / 2), 2)
-
-# ---- Design ----
-st.sidebar.header("Design")
-show_column_names = st.sidebar.checkbox("Show column names", True)
-row_height_factor = st.sidebar.slider("Row height factor", 0.1, 1.5, 0.9)
-
-highlight_column = st.sidebar.selectbox(
-    "Highlight column", ["None"] + df.columns.tolist()
-)
-highlight_column = None if highlight_column == "None" else highlight_column
-
-if highlight_column:
-    highlight_padding = st.sidebar.slider("Highlight padding", 0, 20, 2)
-    side_highlight = st.sidebar.checkbox("Side strip highlight", False)
-else:
-    highlight_padding = 0
-    side_highlight = False
-
-sidebar_factor = (
-    st.sidebar.slider("Sidebar width factor", 0.05, 0.5, 0.1)
-    if side_highlight
-    else 0
-)
-
-show_border = st.sidebar.checkbox("Show border", True)
-
-# ---- Preview ----
-st.subheader("Live preview")
-
-buffer = io.BytesIO()
-c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
-
-draw_label_on_canvas(
-    c_prev,
-    df.iloc[row_index],
-    0, 0,
-    visible_columns,
-    code_column,
-    code_type,
-    highlight_column,
-    label_width,
-    label_height,
-    qr_size,
-    barcode_width,
-    barcode_height,
-    row_height_factor,
-    sidebar_factor,
-    highlight_padding,
-    show_border=show_border,
-    show_column_names=show_column_names,
-    side_highlight=side_highlight,
-    qr_left_offset=qr_left_offset,
-)
-c_prev.save()
-buffer.seek(0)
-
-pdf = pdfium.PdfDocument(buffer)
-pil_image = pdf[0].render(scale=3).to_pil()
-st.image(pil_image, caption=f"Previewing Row {row_index + 1}")
-
-# ======================
-# Export PDF
-# ======================
-st.subheader("Export Labels / PDF")
-
-# ---- Page size / printer selector ----
-page_format = st.selectbox(
-    "Page size / printer",
-    ["A4", "Letter", "LabelPrinter"],
-    index=2
-)
-
-# ---- Generate button ----
-if st.button("Generate Multi-Label PDF"):
-    pdf_path = generate_sheet_direct(
-        df,
-        visible_columns,
-        code_column,
-        code_type,
-        highlight_column,
-        label_width,
-        label_height,
-        qr_size,
-        barcode_width,
-        barcode_height,
-        row_height_factor,
-        sidebar_factor,
-        highlight_padding,
-        show_border=show_border,
-        show_column_names=show_column_names,
-        side_highlight=side_highlight,
-        qr_left_offset=qr_left_offset,
-        page_format=page_format,
+    row_index = st.number_input(
+        "Preview row",
+        min_value=1,
+        max_value=len(df_to_use),
+        value=1,
+    ) - 1
+    
+    repeat_count = st.number_input(
+        "Copies per label",
+        min_value=1,
+        max_value=100,
+        value=1,
+        help="How many times each record will be printed."
     )
-    st.success("PDF generated")
-    st.download_button(
-        "Download PDF",
-        data=open(pdf_path, "rb"),
-        file_name=f"multi_labels_{page_format}.pdf",
-        mime="application/pdf",
+
+# 2. Label Size Category
+with st.sidebar.expander("Label Size", expanded=False):
+    UNIT_MM = "Metric (mm)"
+    UNIT_INCH_FRACTIONAL = "Imperial (inches)"
+    UNIT_INCH_DECIMAL = "Imperial (inch decimal)"
+
+    units = st.selectbox("Units", [UNIT_MM, UNIT_INCH_FRACTIONAL, UNIT_INCH_DECIMAL], index=0)
+
+    LABEL_PRESETS = [
+        ("Cryovial", 25, 12, 25, 12),
+        ("Small Label", 25, 67, 67, 25),
+        ("Wristband Label", 25, 254, 254, 25),
+        ("Small Plant Tag", 50, 25, 50, 25),
+        ("Cryobox / Tube", 30, 15, 30, 15),
+        ("General Purpose", 76, 25, 76, 25),
+        ("Food Label", 76, 51, 76, 51),
+        ("Tag Label", 57, 102, 57, 102),
+        ("Standard Plant Label", 70, 35, 70, 35),
+        ("Large Field Label", 90, 45, 90, 45),
+        ("Shipping Label", 102, 152, 102, 152),
+        ("Square Label", 51, 51, 51, 51),
+    ]
+
+    def format_fractional_inches(value_in):
+        from fractions import Fraction
+        whole = int(value_in)
+        frac = Fraction(value_in - whole).limit_denominator(16)
+        if frac.numerator == 0: return str(whole)
+        if whole == 0: return f"{frac.numerator}/{frac.denominator}"
+        return f"{whole} {frac.numerator}/{frac.denominator}"
+
+    def format_preset_label(name, display_w_mm, display_h_mm, units_mode):
+        if units_mode == UNIT_MM: return f"{name} ({display_w_mm} × {display_h_mm} mm)"
+        w_in, h_in = display_w_mm / 25.4, display_h_mm / 25.4
+        if units_mode == UNIT_INCH_FRACTIONAL: return f"{name} ({format_fractional_inches(w_in)} × {format_fractional_inches(h_in)} inches)"
+        return f"{name} ({w_in:.3f} × {h_in:.3f} inches)"
+
+    preset_options = ["Custom"] + [format_preset_label(n, w, h, units) for n, w, h, _, _ in LABEL_PRESETS]
+    preset = st.selectbox("Preset", preset_options)
+    
+    if preset == "Custom":
+        if units == UNIT_MM:
+            label_width = st.slider("Width (mm)", 10, 140, 70, step=1)
+            label_height = st.slider("Height (mm)", 10, 140, 35, step=1)
+        else:
+            step_in = 1 / 16 if units == UNIT_INCH_FRACTIONAL else 0.01
+            label_width_in = st.slider("Width (in)", 0.4, 5.5, 2.75, step=step_in)
+            label_height_in = st.slider("Height (in)", 0.4, 5.5, 1.37, step=step_in)
+            label_width, label_height = label_width_in * 25.4, label_height_in * 25.4
+    else:
+        label_width, label_height = LABEL_PRESETS[preset_options.index(preset)-1][3:5]
+
+# 3. Code Settings Category
+with st.sidebar.expander("Code Settings", expanded=False):
+    code_type = st.selectbox("Code type", ["QR", "Barcode", "None"], index=0)
+    code_column = st.selectbox("Code column", df_to_use.columns.tolist()) if code_type != "None" else None
+
+    if code_type == "QR":
+        qr_max = max(8, int(label_height - 2))
+        qr_size = st.slider("QR size (mm)", 8, qr_max, min(18, qr_max))
+        barcode_width = barcode_height = 0
+    elif code_type == "Barcode":
+        barcode_width = st.slider("Barcode width (mm)", 15, max(15, int(label_width - 5)), 25)
+        barcode_height = st.slider("Barcode height (mm)", 5, max(5, int(label_height - 5)), 10)
+        qr_size = 0
+    else:
+        qr_size = barcode_width = barcode_height = 0
+
+    qr_left_offset = st.slider("Code left offset (mm)", 0, int(label_width / 2), 2)
+
+# 4. Design and Aesthetics Category
+with st.sidebar.expander("Design & Aesthetics", expanded=False):
+    show_column_names = st.checkbox("Show column names", True)
+    row_height_factor = st.slider("Row height factor", 0.1, 1.5, 0.9)
+    text_left_offset = st.slider("Text left offset (mm)", 0, int(label_width / 2), 0)
+    label_font = st.selectbox("Label font", ["Helvetica", "Times-Roman", "Courier"], index=0)
+    label_font_size = st.slider("Label font size (pt)", 4, 14, 7)
+    highlight_column = st.selectbox("Highlight column", ["None"] + df_to_use.columns.tolist())
+    highlight_column = None if highlight_column == "None" else highlight_column
+
+    if highlight_column:
+        highlight_padding = st.slider("Highlight padding", 0, 20, 2)
+        side_highlight = st.checkbox("Side strip highlight", False)
+    else:
+        highlight_padding = side_highlight = 0
+
+    sidebar_factor = st.slider("Sidebar width factor", 0.05, 0.5, 0.1) if side_highlight else 0
+    show_border = st.checkbox("Show border", True)
+
+with preview_container:
+    # ---- Preview ----
+    st.subheader("2. Live Preview")
+    buffer = io.BytesIO()
+    c_prev = canvas.Canvas(buffer, pagesize=(label_width * mm, label_height * mm))
+
+    draw_label_on_canvas(
+        c_prev, df_to_use.iloc[row_index], 0, 0,
+        visible_columns, code_column, code_type, highlight_column,
+        label_font, label_font_size, label_width, label_height,
+        qr_size, barcode_width, barcode_height, row_height_factor,
+        sidebar_factor, highlight_padding, show_border=show_border,
+        show_column_names=show_column_names, side_highlight=side_highlight,
+        qr_left_offset=qr_left_offset, text_left_offset=text_left_offset
     )
+    c_prev.save()
+    buffer.seek(0)
+    st.image(pdfium.PdfDocument(buffer)[0].render(scale=3).to_pil(), caption=f"Previewing Selected Row {row_index + 1}")
+
+with export_container:
+    # ======================
+    # Export PDF
+    # ======================
+    st.subheader("4. Export Labels / PDF")
+    page_format = st.selectbox("Page size / printer", ["A4", "Letter", "LabelPrinter"], index=2)
+
+    if st.button("Generate Multi-Label PDF"):
+        pdf_path = generate_sheet_direct(
+            df_to_use, visible_columns, code_column, code_type, highlight_column,
+            label_font, label_font_size, label_width, label_height, qr_size,
+            barcode_width, barcode_height, row_height_factor, sidebar_factor,
+            highlight_padding, show_border, show_column_names, side_highlight,
+            qr_left_offset, text_left_offset, page_format, repeat_count
+        )
+        st.success(f"PDF generated for {len(df_to_use)} unique labels ({len(df_to_use)*repeat_count} total).")
+        st.download_button(
+            "Download PDF",
+            data=open(pdf_path, "rb"),
+            file_name=f"multi_labels_{page_format}.pdf",
+            mime="application/pdf"
+        )
