@@ -21,6 +21,8 @@ if "df" not in st.session_state:
     st.session_state.df = None
 if "data_source" not in st.session_state:
     st.session_state.data_source = None
+if "start_selected_source" not in st.session_state:
+    st.session_state.start_selected_source = None
 
 TEMPLATE_VERSION = 1
 TEMPLATE_DEFAULTS = {
@@ -45,15 +47,23 @@ TEMPLATE_DEFAULTS = {
     "highlight_padding_slider": 2,
     "side_highlight_check": False,
     "sidebar_factor_slider": 0.1,
-    "show_border_check": True,
 }
 
 
-def build_template_payload():
+def build_template_payload(label_width_mm=None, label_height_mm=None):
     settings = {
         key: st.session_state.get(key, default)
         for key, default in TEMPLATE_DEFAULTS.items()
     }
+    # Save normalized label dimensions so load does not depend on preset display text.
+    if label_width_mm is not None and label_height_mm is not None:
+        width_mm = float(label_width_mm)
+        height_mm = float(label_height_mm)
+        settings["preset_select"] = "Custom"
+        settings["label_width_mm_slider"] = int(round(width_mm))
+        settings["label_height_mm_slider"] = int(round(height_mm))
+        settings["label_width_in_slider"] = round(width_mm / 25.4, 3)
+        settings["label_height_in_slider"] = round(height_mm / 25.4, 3)
     return {
         "template_version": TEMPLATE_VERSION,
         "app": "PlantID Label Designer",
@@ -87,6 +97,26 @@ def load_template_payload(uploaded_file):
 
     for key, value in applied.items():
         st.session_state[key] = value
+
+    # Backfill equivalent units and force Custom so loaded dimensions are respected.
+    if "label_width_mm_slider" in applied and "label_height_mm_slider" in applied:
+        try:
+            w_mm = float(applied["label_width_mm_slider"])
+            h_mm = float(applied["label_height_mm_slider"])
+            st.session_state["label_width_in_slider"] = round(w_mm / 25.4, 3)
+            st.session_state["label_height_in_slider"] = round(h_mm / 25.4, 3)
+            st.session_state["preset_select"] = "Custom"
+        except Exception:
+            pass
+    elif "label_width_in_slider" in applied and "label_height_in_slider" in applied:
+        try:
+            w_in = float(applied["label_width_in_slider"])
+            h_in = float(applied["label_height_in_slider"])
+            st.session_state["label_width_mm_slider"] = int(round(w_in * 25.4))
+            st.session_state["label_height_mm_slider"] = int(round(h_in * 25.4))
+            st.session_state["preset_select"] = "Custom"
+        except Exception:
+            pass
 
     return applied, None
 
@@ -381,11 +411,29 @@ st.title("PlantID Label Designer")
 # Start page
 # ======================
 if st.session_state.df is None:
-    st.subheader("Start")
+    st.write(
+        "PlantID Label Designer is a Streamlit web application for generating customizable plant sample labels "
+        "from a CSV file. Labels can be optionally designed with QR and Barcodes and exported in various sizes "
+        "for label or paper printing."
+    )
+    
+    st.info("Choose a CSV or click 'Use default CSV'")
+    uploaded_file = st.file_uploader("Browse files", type=["csv"], label_visibility="visible")
+    if st.button("Use example CSV", key="use_default_csv_btn"):
+        st.session_state.start_selected_source = "Example dataset"
 
-    uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    if uploaded_file is not None:
+        st.session_state.start_selected_source = "Uploaded CSV"
+    elif st.session_state.start_selected_source == "Uploaded CSV":
+        st.session_state.start_selected_source = None
+
+    if st.session_state.start_selected_source == "Uploaded CSV" and uploaded_file is not None:
+        st.success(f"Loaded data: Uploaded CSV ({uploaded_file.name})")
+    elif st.session_state.start_selected_source == "Example dataset":
+        st.success("Loaded data: Example file (PV1_metadata.csv)")
+
+    st.info("Optionally, load a label template saved from a previous session")
     use_template_layout = st.toggle("Use a template layout", value=False, key="use_template_layout_toggle")
-    template_file = None
 
     if use_template_layout:
         template_file = st.file_uploader(
@@ -393,34 +441,37 @@ if st.session_state.df is None:
             type=["json"],
             key="start_template_file",
         )
-        if st.button("Load template", key="load_template_btn"):
+        if template_file is not None:
             _, template_error = load_template_payload(template_file)
             if template_error:
                 st.error(template_error)
             else:
                 st.success(f"Loaded template: {template_file.name}")
 
-    if st.button("Use example dataset"):
-        example_path = os.path.join(os.path.dirname(__file__), "PV1_metadata.csv")
-        # Create a simple example if file doesn't exist
-        if os.path.exists(example_path):
-            st.session_state.df = pd.read_csv(example_path)
+    st.info("When ready, click Go.")
+
+    if st.button("Go", key="start_go_btn"):
+        if st.session_state.start_selected_source == "Example dataset":
+            example_path = os.path.join(os.path.dirname(__file__), "PV1_metadata.csv")
+            # Create a simple example if file doesn't exist
+            if os.path.exists(example_path):
+                st.session_state.df = pd.read_csv(example_path)
+            else:
+                st.session_state.df = pd.DataFrame({
+                    "ID": ["P001", "P002", "P003", "P004"],
+                    "Species": ["Arabidopsis", "Arabidopsis", "Wheat", "Maize"],
+                    "Genotype": ["Col-0", "Ler", "Bobwhite", "B73"],
+                    "Treatment": ["Control", "Salt", "Control", "Drought"]
+                })
+            st.session_state.data_source = "Example dataset"
+            st.rerun()
+        elif st.session_state.start_selected_source == "Uploaded CSV" and uploaded_file is not None:
+            st.session_state.df = pd.read_csv(uploaded_file)
+            st.session_state.data_source = "Uploaded CSV"
+            st.rerun()
         else:
-            st.session_state.df = pd.DataFrame({
-                "ID": ["P001", "P002", "P003", "P004"],
-                "Species": ["Arabidopsis", "Arabidopsis", "Wheat", "Maize"],
-                "Genotype": ["Col-0", "Ler", "Bobwhite", "B73"],
-                "Treatment": ["Control", "Salt", "Control", "Drought"]
-            })
-        st.session_state.data_source = "Example dataset"
-        st.rerun()
+            st.error("Select a CSV upload or click 'Use default CSV' before clicking Go.")
 
-    if uploaded_file:
-        st.session_state.df = pd.read_csv(uploaded_file)
-        st.session_state.data_source = "Uploaded CSV"
-        st.rerun()
-
-    st.info("Upload a CSV or use the example dataset to begin.")
     st.stop()
 
 # ==========================================
@@ -620,10 +671,12 @@ with st.sidebar.expander("Design & Aesthetics", expanded=False):
         sidebar_factor = st.slider("Sidebar width factor", 0.05, 0.5, key="sidebar_factor_slider")
     else:
         sidebar_factor = 0
-    ensure_bool("show_border_check", TEMPLATE_DEFAULTS["show_border_check"])
-    show_border = st.checkbox("Show border", key="show_border_check")
+    show_border = True
 
-    template_json = json.dumps(build_template_payload(), indent=2).encode("utf-8")
+    template_json = json.dumps(
+        build_template_payload(label_width_mm=label_width, label_height_mm=label_height),
+        indent=2,
+    ).encode("utf-8")
     st.download_button(
         "Save template",
         data=template_json,
