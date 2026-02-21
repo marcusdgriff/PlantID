@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import io
 import os
+import json
 import pypdfium2 as pdfium
 
 from reportlab.lib.pagesizes import mm, A4
@@ -20,6 +21,101 @@ if "df" not in st.session_state:
     st.session_state.df = None
 if "data_source" not in st.session_state:
     st.session_state.data_source = None
+
+TEMPLATE_VERSION = 1
+TEMPLATE_DEFAULTS = {
+    "units_select": "Metric (mm)",
+    "preset_select": "Custom",
+    "label_width_mm_slider": 70,
+    "label_height_mm_slider": 35,
+    "label_width_in_slider": 2.75,
+    "label_height_in_slider": 1.37,
+    "code_type_select": "QR",
+    "code_column_select": None,
+    "qr_size_slider": 18,
+    "barcode_width_slider": 25,
+    "barcode_height_slider": 10,
+    "qr_left_offset_slider": 2,
+    "show_column_names_check": True,
+    "row_height_factor_slider": 0.9,
+    "text_left_offset_slider": 0,
+    "label_font_select": "Helvetica",
+    "label_font_size_slider": 7,
+    "highlight_column_select": "None",
+    "highlight_padding_slider": 2,
+    "side_highlight_check": False,
+    "sidebar_factor_slider": 0.1,
+    "show_border_check": True,
+}
+
+
+def build_template_payload():
+    settings = {
+        key: st.session_state.get(key, default)
+        for key, default in TEMPLATE_DEFAULTS.items()
+    }
+    return {
+        "template_version": TEMPLATE_VERSION,
+        "app": "PlantID Label Designer",
+        "settings": settings,
+    }
+
+
+def load_template_payload(uploaded_file):
+    if uploaded_file is None:
+        return None, "No file selected."
+    try:
+        raw = uploaded_file.getvalue()
+        parsed = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        return None, f"Could not read template file: {exc}"
+
+    if not isinstance(parsed, dict):
+        return None, "Template must be a JSON object."
+
+    settings = parsed.get("settings", parsed)
+    if not isinstance(settings, dict):
+        return None, "Template settings must be a JSON object."
+
+    applied = {}
+    for key in TEMPLATE_DEFAULTS:
+        if key in settings:
+            applied[key] = settings[key]
+
+    if not applied:
+        return None, "No supported settings were found in the template."
+
+    for key, value in applied.items():
+        st.session_state[key] = value
+
+    return applied, None
+
+
+def ensure_choice(key, options, default):
+    if key not in st.session_state:
+        st.session_state[key] = default
+    if st.session_state[key] not in options:
+        st.session_state[key] = default
+
+
+def ensure_int_range(key, default, min_value, max_value):
+    try:
+        value = int(st.session_state.get(key, default))
+    except Exception:
+        value = default
+    st.session_state[key] = max(min_value, min(max_value, value))
+
+
+def ensure_float_range(key, default, min_value, max_value):
+    try:
+        value = float(st.session_state.get(key, default))
+    except Exception:
+        value = default
+    st.session_state[key] = max(min_value, min(max_value, value))
+
+
+def ensure_bool(key, default):
+    st.session_state[key] = bool(st.session_state.get(key, default))
 
 # ======================================================
 # Draw a single label directly onto a ReportLab canvas
@@ -288,23 +384,36 @@ if st.session_state.df is None:
     st.subheader("Start")
 
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+    use_template_layout = st.toggle("Use a template layout", value=False, key="use_template_layout_toggle")
+    template_file = None
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Use example dataset"):
-            example_path = os.path.join(os.path.dirname(__file__), "PV1_metadata.csv")
-            # Create a simple example if file doesn't exist
-            if os.path.exists(example_path):
-                st.session_state.df = pd.read_csv(example_path)
+    if use_template_layout:
+        template_file = st.file_uploader(
+            "Choose template file",
+            type=["json"],
+            key="start_template_file",
+        )
+        if st.button("Load template", key="load_template_btn"):
+            _, template_error = load_template_payload(template_file)
+            if template_error:
+                st.error(template_error)
             else:
-                st.session_state.df = pd.DataFrame({
-                    "ID": ["P001", "P002", "P003", "P004"],
-                    "Species": ["Arabidopsis", "Arabidopsis", "Wheat", "Maize"],
-                    "Genotype": ["Col-0", "Ler", "Bobwhite", "B73"],
-                    "Treatment": ["Control", "Salt", "Control", "Drought"]
-                })
-            st.session_state.data_source = "Example dataset"
-            st.rerun()
+                st.success(f"Loaded template: {template_file.name}")
+
+    if st.button("Use example dataset"):
+        example_path = os.path.join(os.path.dirname(__file__), "PV1_metadata.csv")
+        # Create a simple example if file doesn't exist
+        if os.path.exists(example_path):
+            st.session_state.df = pd.read_csv(example_path)
+        else:
+            st.session_state.df = pd.DataFrame({
+                "ID": ["P001", "P002", "P003", "P004"],
+                "Species": ["Arabidopsis", "Arabidopsis", "Wheat", "Maize"],
+                "Genotype": ["Col-0", "Ler", "Bobwhite", "B73"],
+                "Treatment": ["Control", "Salt", "Control", "Drought"]
+            })
+        st.session_state.data_source = "Example dataset"
+        st.rerun()
 
     if uploaded_file:
         st.session_state.df = pd.read_csv(uploaded_file)
@@ -394,7 +503,9 @@ with st.sidebar.expander("Label Size", expanded=False):
     UNIT_INCH_FRACTIONAL = "Imperial (inches)"
     UNIT_INCH_DECIMAL = "Imperial (inch decimal)"
 
-    units = st.selectbox("Units", [UNIT_MM, UNIT_INCH_FRACTIONAL, UNIT_INCH_DECIMAL], index=0)
+    unit_options = [UNIT_MM, UNIT_INCH_FRACTIONAL, UNIT_INCH_DECIMAL]
+    ensure_choice("units_select", unit_options, TEMPLATE_DEFAULTS["units_select"])
+    units = st.selectbox("Units", unit_options, key="units_select")
 
     LABEL_PRESETS = [
         ("Cryovial", 25, 12, 25, 12),
@@ -426,56 +537,99 @@ with st.sidebar.expander("Label Size", expanded=False):
         return f"{name} ({w_in:.3f} × {h_in:.3f} inches)"
 
     preset_options = ["Custom"] + [format_preset_label(n, w, h, units) for n, w, h, _, _ in LABEL_PRESETS]
-    preset = st.selectbox("Preset", preset_options)
+    ensure_choice("preset_select", preset_options, TEMPLATE_DEFAULTS["preset_select"])
+    preset = st.selectbox("Preset", preset_options, key="preset_select")
     
     if preset == "Custom":
         if units == UNIT_MM:
-            label_width = st.slider("Width (mm)", 10, 140, 70, step=1)
-            label_height = st.slider("Height (mm)", 10, 140, 35, step=1)
+            ensure_int_range("label_width_mm_slider", TEMPLATE_DEFAULTS["label_width_mm_slider"], 10, 140)
+            ensure_int_range("label_height_mm_slider", TEMPLATE_DEFAULTS["label_height_mm_slider"], 10, 140)
+            label_width = st.slider("Width (mm)", 10, 140, step=1, key="label_width_mm_slider")
+            label_height = st.slider("Height (mm)", 10, 140, step=1, key="label_height_mm_slider")
         else:
             step_in = 1 / 16 if units == UNIT_INCH_FRACTIONAL else 0.01
-            label_width_in = st.slider("Width (in)", 0.4, 5.5, 2.75, step=step_in)
-            label_height_in = st.slider("Height (in)", 0.4, 5.5, 1.37, step=step_in)
+            ensure_float_range("label_width_in_slider", TEMPLATE_DEFAULTS["label_width_in_slider"], 0.4, 5.5)
+            ensure_float_range("label_height_in_slider", TEMPLATE_DEFAULTS["label_height_in_slider"], 0.4, 5.5)
+            label_width_in = st.slider("Width (in)", 0.4, 5.5, step=step_in, key="label_width_in_slider")
+            label_height_in = st.slider("Height (in)", 0.4, 5.5, step=step_in, key="label_height_in_slider")
             label_width, label_height = label_width_in * 25.4, label_height_in * 25.4
     else:
         label_width, label_height = LABEL_PRESETS[preset_options.index(preset)-1][3:5]
 
 # 3. Code Settings Category
 with st.sidebar.expander("Code Settings", expanded=False):
-    code_type = st.selectbox("Code type", ["QR", "Barcode", "None"], index=0)
-    code_column = st.selectbox("Code column", st.session_state.df.columns.tolist()) if code_type != "None" else None
+    code_type_options = ["QR", "Barcode", "None"]
+    ensure_choice("code_type_select", code_type_options, TEMPLATE_DEFAULTS["code_type_select"])
+    code_type = st.selectbox("Code type", code_type_options, key="code_type_select")
+    if code_type != "None":
+        code_column_options = st.session_state.df.columns.tolist()
+        ensure_choice("code_column_select", code_column_options, code_column_options[0])
+        code_column = st.selectbox("Code column", code_column_options, key="code_column_select")
+    else:
+        code_column = None
 
     if code_type == "QR":
         qr_max = max(8, int(label_height - 2))
-        qr_size = st.slider("QR size (mm)", 8, qr_max, min(18, qr_max))
+        ensure_int_range("qr_size_slider", min(18, qr_max), 8, qr_max)
+        qr_size = st.slider("QR size (mm)", 8, qr_max, key="qr_size_slider")
         barcode_width = barcode_height = 0
     elif code_type == "Barcode":
-        barcode_width = st.slider("Barcode width (mm)", 15, max(15, int(label_width - 5)), 25)
-        barcode_height = st.slider("Barcode height (mm)", 5, max(5, int(label_height - 5)), 10)
+        max_barcode_width = max(15, int(label_width - 5))
+        max_barcode_height = max(5, int(label_height - 5))
+        ensure_int_range("barcode_width_slider", TEMPLATE_DEFAULTS["barcode_width_slider"], 15, max_barcode_width)
+        ensure_int_range("barcode_height_slider", TEMPLATE_DEFAULTS["barcode_height_slider"], 5, max_barcode_height)
+        barcode_width = st.slider("Barcode width (mm)", 15, max_barcode_width, key="barcode_width_slider")
+        barcode_height = st.slider("Barcode height (mm)", 5, max_barcode_height, key="barcode_height_slider")
         qr_size = 0
     else:
         qr_size = barcode_width = barcode_height = 0
 
-    qr_left_offset = st.slider("Code left offset (mm)", 0, int(label_width / 2), 2)
+    max_qr_left_offset = int(label_width / 2)
+    ensure_int_range("qr_left_offset_slider", TEMPLATE_DEFAULTS["qr_left_offset_slider"], 0, max_qr_left_offset)
+    qr_left_offset = st.slider("Code left offset (mm)", 0, max_qr_left_offset, key="qr_left_offset_slider")
 
 # 4. Design and Aesthetics Category
 with st.sidebar.expander("Design & Aesthetics", expanded=False):
-    show_column_names = st.checkbox("Show column names", True)
-    row_height_factor = st.slider("Row height factor", 0.1, 1.5, 0.9)
-    text_left_offset = st.slider("Text left offset (mm)", 0, int(label_width / 2), 0)
-    label_font = st.selectbox("Label font", ["Helvetica", "Times-Roman", "Courier"], index=0)
-    label_font_size = st.slider("Label font size (pt)", 4, 14, 7)
-    highlight_column = st.selectbox("Highlight column", ["None"] + st.session_state.df.columns.tolist())
+    ensure_bool("show_column_names_check", TEMPLATE_DEFAULTS["show_column_names_check"])
+    show_column_names = st.checkbox("Show column names", key="show_column_names_check")
+    ensure_float_range("row_height_factor_slider", TEMPLATE_DEFAULTS["row_height_factor_slider"], 0.1, 1.5)
+    row_height_factor = st.slider("Row height factor", 0.1, 1.5, key="row_height_factor_slider")
+    max_text_left_offset = int(label_width / 2)
+    ensure_int_range("text_left_offset_slider", TEMPLATE_DEFAULTS["text_left_offset_slider"], 0, max_text_left_offset)
+    text_left_offset = st.slider("Text left offset (mm)", 0, max_text_left_offset, key="text_left_offset_slider")
+    label_font_options = ["Helvetica", "Times-Roman", "Courier"]
+    ensure_choice("label_font_select", label_font_options, TEMPLATE_DEFAULTS["label_font_select"])
+    label_font = st.selectbox("Label font", label_font_options, key="label_font_select")
+    ensure_int_range("label_font_size_slider", TEMPLATE_DEFAULTS["label_font_size_slider"], 4, 14)
+    label_font_size = st.slider("Label font size (pt)", 4, 14, key="label_font_size_slider")
+    highlight_options = ["None"] + st.session_state.df.columns.tolist()
+    ensure_choice("highlight_column_select", highlight_options, TEMPLATE_DEFAULTS["highlight_column_select"])
+    highlight_column = st.selectbox("Highlight column", highlight_options, key="highlight_column_select")
     highlight_column = None if highlight_column == "None" else highlight_column
 
     if highlight_column:
-        highlight_padding = st.slider("Highlight padding", 0, 20, 2)
-        side_highlight = st.checkbox("Side strip highlight", False)
+        ensure_int_range("highlight_padding_slider", TEMPLATE_DEFAULTS["highlight_padding_slider"], 0, 20)
+        ensure_bool("side_highlight_check", TEMPLATE_DEFAULTS["side_highlight_check"])
+        highlight_padding = st.slider("Highlight padding", 0, 20, key="highlight_padding_slider")
+        side_highlight = st.checkbox("Side strip highlight", key="side_highlight_check")
     else:
         highlight_padding = side_highlight = 0
 
-    sidebar_factor = st.slider("Sidebar width factor", 0.05, 0.5, 0.1) if side_highlight else 0
-    show_border = st.checkbox("Show border", True)
+    if side_highlight:
+        ensure_float_range("sidebar_factor_slider", TEMPLATE_DEFAULTS["sidebar_factor_slider"], 0.05, 0.5)
+        sidebar_factor = st.slider("Sidebar width factor", 0.05, 0.5, key="sidebar_factor_slider")
+    else:
+        sidebar_factor = 0
+    ensure_bool("show_border_check", TEMPLATE_DEFAULTS["show_border_check"])
+    show_border = st.checkbox("Show border", key="show_border_check")
+
+    template_json = json.dumps(build_template_payload(), indent=2).encode("utf-8")
+    st.download_button(
+        "Save template",
+        data=template_json,
+        file_name="plantid_label_template.json",
+        mime="application/json",
+    )
 
 with summary_container:
     # ==========================================
